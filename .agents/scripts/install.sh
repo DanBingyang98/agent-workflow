@@ -9,7 +9,8 @@
 # 做三件事（全部可重复执行，已有内容不覆盖，冲突只报告）:
 #   1. 技能链接:  .claude/skills/<skill> -> .agents/skills/<skill>
 #   2. 指令链接:  AGENTS.md -> .agents/AGENTS.md
-#                .claude/CLAUDE.md -> .agents/AGENTS.md
+#                CLAUDE.md -> .agents/AGENTS.md（Claude Code 记忆入口）
+#                旧位置 .claude/CLAUDE.md 链接由脚本清理（仅限指向 .agents/AGENTS.md 的链接）
 #   3. 钩子配置:  .codex/hooks.json 与 .claude/settings.json 写入 PreToolUse
 #                指向 .agents/hooks/block-dangerous.sh
 #   4. git 配置:  core.hooksPath = .agents/hooks
@@ -85,9 +86,25 @@ for skill_dir in "$SKILLS_DIR"/*/; do
   ensure_link "$REPO_ROOT/.claude/skills/$name" "../../.agents/skills/$name" "技能 $name"
 done
 
-# 2. 指令链接
+# 2. 指令链接（根 CLAUDE.md 是 Claude Code 的记忆入口）
 ensure_link "$REPO_ROOT/AGENTS.md" ".agents/AGENTS.md" "根 AGENTS.md"
-ensure_link "$REPO_ROOT/.claude/CLAUDE.md" "../.agents/AGENTS.md" "CLAUDE.md"
+ensure_link "$REPO_ROOT/CLAUDE.md" ".agents/AGENTS.md" "根 CLAUDE.md"
+
+# 清理旧位置 .claude/CLAUDE.md：只删本套件创建的链接（指向 .agents/AGENTS.md），其余一律跳过
+LEGACY_CLAUDE_LINK="$REPO_ROOT/.claude/CLAUDE.md"
+if [ -L "$LEGACY_CLAUDE_LINK" ]; then
+  cur=$(readlink "$LEGACY_CLAUDE_LINK")
+  if [ "$cur" = "../.agents/AGENTS.md" ]; then
+    drift "旧位置 .claude/CLAUDE.md 链接指向 .agents/AGENTS.md"
+    if [ "$MODE" = sync ]; then
+      rm -f -- "$LEGACY_CLAUDE_LINK" && say "已移除旧 CLAUDE.md 链接"
+    fi
+  else
+    conflict ".claude/CLAUDE.md 是指向 $cur 的链接，不是本套件创建，跳过"
+  fi
+elif [ -e "$LEGACY_CLAUDE_LINK" ]; then
+  conflict ".claude/CLAUDE.md 是真实文件，跳过"
+fi
 
 # 3. hooks 配置
 write_hook_json() {

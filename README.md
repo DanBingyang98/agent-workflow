@@ -38,7 +38,7 @@
 安装脚本做四件事：
 
 1. `.claude/skills/<skill>` → `.agents/skills/<skill>`（Claude Code 不认 `.agents/skills`，逐技能链接；Codex 原生读取 `.agents/skills`）
-2. 根 `AGENTS.md` 与 `.claude/CLAUDE.md` → `.agents/AGENTS.md`（两个 agent 都读到同一份中文指令）
+2. 根 `AGENTS.md` 与根 `CLAUDE.md` → `.agents/AGENTS.md`（两个 agent 都读到同一份中文指令）
 3. `.codex/hooks.json` 与 `.claude/settings.json` 写入 PreToolUse，指向 `hooks/block-dangerous.sh`
 4. `git config core.hooksPath .agents/hooks`（git 层保护对所有 git 客户端生效）
 

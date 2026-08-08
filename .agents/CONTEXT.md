@@ -14,7 +14,7 @@ _Avoid_: 插件、提示词
 
 **AGENTS.md**:
 项目级 agent 指令文件。本套件以 `.agents/AGENTS.md`（中文）为权威版本，各 agent 通过安装脚本引用，不做复制。
-_Avoid_: CLAUDE.md（仅作为 Claude Code 的引用入口）
+_Avoid_: CLAUDE.md（Claude Code 的项目记忆入口，仅引用 AGENTS.md，不承载权威内容）
 
 **轻量 Git Flow**:
 本套件的分支模型——`main`（受保护，仅发布）与 `develop`（集成分支）为常驻分支，`feature/*`、`hotfix/*` 为短命分支；不设 `release/*`。
