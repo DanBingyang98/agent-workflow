@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# flow - 轻量 Git Flow 命令集（中文版 agent 工作流）
+#
+# 分支模型: main（受保护，仅发布） + develop（集成分支） + feature/* + hotfix/*
+# 不设 release/*。main 只接受从 hotfix 的受保护合并。
+#
+# 用法:
+#   flow feature start <name>    从 develop 创建 feature/<name>
+#   flow feature finish <name>   合并 feature/<name> 到 develop 并删除分支
+#   flow hotfix start <name>     从 main 创建 hotfix/<name>
+#   flow hotfix finish <name>    合并 hotfix/<name> 到 main 与 develop 并删除分支
+#   flow status                  显示当前分支与仓库状态
+#   flow help                    显示本帮助
+
+set -u
+
+SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+GUARD="$SCRIPTS_DIR/guard"
+
+die() {
+  printf '[flow] 错误: %s\n' "$1" >&2
+  exit 1
+}
+
+usage() {
+  sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+require_guard() {
+  [ -x "$GUARD" ] || die "缺少 guard 脚本: $GUARD（请 chmod +x）"
+}
+
+feature_start() {
+  local name="${1:-}" target
+  require_guard
+  "$GUARD" branch-name "$name" || exit 1
+  "$GUARD" clean-check || exit 1
+  target="feature/$name"
+  "$GUARD" branch-missing "$target" || exit 1
+  git checkout develop >/dev/null 2>&1 || die "无法切换到 develop（分支存在吗？）"
+  git pull --ff-only origin develop >/dev/null 2>&1 || true
+  git checkout -b "$target" || die "创建 $target 失败"
+  printf '[flow] 已创建 %s（基于 develop）\n' "$target"
+}
+
+feature_finish() {
+  local name="${1:-}" target
+  require_guard
+  target="feature/$name"
+  "$GUARD" branch-exists "$target" || exit 1
+  git checkout develop >/dev/null 2>&1 || die "无法切换到 develop"
+  git merge --no-ff "$target" -m "Merge feature/$name into develop" || die "合并失败（冲突需手动解决）"
+  git branch -d "$target" || die "删除 $target 失败"
+  printf '[flow] 已合并 %s 到 develop 并删除分支\n' "$target"
+}
+
+hotfix_start() {
+  local name="${1:-}" target
+  require_guard
+  "$GUARD" branch-name "$name" || exit 1
+  "$GUARD" clean-check || exit 1
+  target="hotfix/$name"
+  "$GUARD" branch-missing "$target" || exit 1
+  git checkout main >/dev/null 2>&1 || die "无法切换到 main"
+  git pull --ff-only origin main >/dev/null 2>&1 || true
+  git checkout -b "$target" || die "创建 $target 失败"
+  printf '[flow] 已创建 %s（基于 main）\n' "$target"
+}
+
+hotfix_finish() {
+  local name="${1:-}" target
+  require_guard
+  target="hotfix/$name"
+  "$GUARD" branch-exists "$target" || exit 1
+  git checkout main >/dev/null 2>&1 || die "无法切换到 main"
+  git merge --no-ff "$target" -m "Merge hotfix/$name into main" || die "合并到 main 失败"
+  git checkout develop >/dev/null 2>&1 || die "无法切换到 develop"
+  git merge --no-ff "$target" -m "Merge hotfix/$name into develop" || die "合并到 develop 失败"
+  git branch -d "$target" || die "删除 $target 失败"
+  printf '[flow] 已合并 %s 到 main 与 develop，并删除分支\n' "$target"
+  printf '[flow] 提示：发布时分别推送 main 与 develop（pre-push 钩子会保护 main）\n'
+}
+
+status_cmd() {
+  local branch
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "(不在 git 仓库)")
+  printf '[flow] 当前分支: %s\n' "$branch"
+  printf '[flow] 最近提交:\n'
+  git log --oneline -5 2>/dev/null || true
+  printf '[flow] 工作区:\n'
+  git status --short 2>/dev/null | head -10 || true
+  [ -n "$(git status --porcelain 2>/dev/null)" ] && printf '[flow] 警告：有未提交改动\n'
+}
+
+case "${1:-}" in
+  feature)
+    case "${2:-}" in
+      start) feature_start "${3:-}" ;;
+      finish) feature_finish "${3:-}" ;;
+      *) echo "用法: flow feature <start|finish> <name>" >&2; exit 2 ;;
+    esac
+    ;;
+  hotfix)
+    case "${2:-}" in
+      start) hotfix_start "${3:-}" ;;
+      finish) hotfix_finish "${3:-}" ;;
+      *) echo "用法: flow hotfix <start|finish> <name>" >&2; exit 2 ;;
+    esac
+    ;;
+  status) status_cmd ;;
+  help | -h | --help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

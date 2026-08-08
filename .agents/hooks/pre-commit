@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# pre-commit - 拦截常见危险提交
+#   1. 合并冲突标记
+#   2. 疑似密钥/凭据
+#   3. 超大文件（>5MB）
+#
+# 覆盖所有 git 客户端（Codex / Claude Code / 人类）。
+# 跳过: GIT_FLOW_SKIP_PRE_COMMIT=1 git commit ...
+
+set -u
+
+[ "${GIT_FLOW_SKIP_PRE_COMMIT:-0}" = "1" ] && exit 0
+
+fail=0
+die() {
+  printf '[pre-commit] 拦截: %s\n' "$1" >&2
+  fail=1
+}
+
+# 1. 合并冲突标记（只查 staged diff 的增行，避免命中注释里的示例）
+conflicts=$(git diff --cached --diff-filter=ACMR -U0 | grep -n -E '^\+.*(<<<<<<<|=======|>>>>>>>)' || true)
+if [ -n "$conflicts" ]; then
+  die "暂存内容里检测到合并冲突标记，请先解决冲突再提交"
+fi
+
+# 2. 疑似密钥/凭据
+secrets=$(git diff --cached --diff-filter=ACMR | grep -n -E \
+  '(AKIA[0-9A-Z]{16}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|password[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']+|secret[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']+)' || true)
+if [ -n "$secrets" ]; then
+  die "暂存内容里检测到疑似密钥/凭据，请确认后改用环境变量或 secrets 管理"
+fi
+
+# 3. 超大文件
+while IFS= read -r f; do
+  size=$(git cat-file -s "$f" 2>/dev/null || echo 0)
+  if [ "$size" -gt 5242880 ]; then
+    die "文件过大（$((size / 1024 / 1024))MB > 5MB）：$f，请改用 Git LFS 或移除"
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+[ "$fail" -eq 0 ] || exit 1
+exit 0
