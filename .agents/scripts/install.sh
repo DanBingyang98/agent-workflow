@@ -134,8 +134,13 @@ write_hook_json() {
   else
     drift "$file 缺失"
     if [ "$MODE" = sync ]; then
-      if [ -w "$(dirname "$file")" ]; then
-        printf '%s\n' "$block" > "$file" && say "已创建 $file"
+      dir=$(dirname "$file")
+      if ! mkdir -p -- "$dir" 2>/dev/null; then
+        conflict "无法创建目录 $dir（只读挂载或权限不足）"
+        return
+      fi
+      if printf '%s\n' "$block" > "$file" 2>/dev/null; then
+        say "已创建 $file"
       else
         conflict "无法写入 $file（目录只读或权限不足）"
       fi
