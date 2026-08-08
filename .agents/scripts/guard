@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 #
-# guard - 轻量 Git Flow 的前置检查（供 flow 脚本与 hooks 复用）
+# guard - dev 中心分支模型的前置检查（供 flow 脚本与 hooks 复用）
 #
 # 用法:
 #   guard clean-check                - 工作区必须干净（无未提交/未暂存改动）
 #   guard branch-name <name>         - 分支名必须是小写 kebab-case
+#   guard branch-prefix-ok <branch>  - 分支必须在工单分支白名单前缀内
+#   guard branch-base <branch>       - 打印该分支的集成基线（develop / main）
 #   guard branch-exists <name>       - 分支必须存在
 #   guard branch-missing <name>      - 分支必须不存在
 #   guard current-branch             - 打印当前分支名
@@ -12,6 +14,9 @@
 # 退出码: 0 = 通过 / 打印成功; 1 = 失败
 
 set -u
+
+# 工单分支前缀白名单（dev 中心分支模型；hooks 内联同源，改这里须同步 hooks）
+BRANCH_PREFIXES="feature fix docs chore hotfix"
 
 die() {
   printf '[guard] 错误: %s\n' "$1" >&2
@@ -43,6 +48,29 @@ cmd_branch_name() {
   printf '[guard] 分支名合法: %s\n' "$name"
 }
 
+cmd_branch_prefix_ok() {
+  local branch="$1" prefix
+  prefix="${branch%%/*}"
+  case " $BRANCH_PREFIXES " in
+    *" $prefix "*)
+      printf '[guard] 分支前缀合法: %s\n' "$prefix"
+      ;;
+    *)
+      die "分支前缀 '$prefix' 不在白名单（$BRANCH_PREFIXES）；rebase 后的 --force-with-lease 会被拦"
+      ;;
+  esac
+}
+
+cmd_branch_base() {
+  local branch="$1" prefix
+  prefix="${branch%%/*}"
+  case "$prefix" in
+    hotfix) printf 'main\n' ;;
+    feature|fix|docs|chore) printf 'develop\n' ;;
+    *) die "分支 '$branch' 不在工单分支白名单（$BRANCH_PREFIXES）" ;;
+  esac
+}
+
 cmd_branch_exists() {
   if ! git show-ref --verify --quiet "refs/heads/$1"; then
     die "分支 '$1' 不存在"
@@ -64,11 +92,13 @@ cmd_current_branch() {
 case "${1:-}" in
   clean-check) cmd_clean_check ;;
   branch-name) cmd_branch_name "${2:-}" ;;
+  branch-prefix-ok) cmd_branch_prefix_ok "${2:-}" ;;
+  branch-base) cmd_branch_base "${2:-}" ;;
   branch-exists) cmd_branch_exists "${2:-}" ;;
   branch-missing) cmd_branch_missing "${2:-}" ;;
   current-branch) cmd_current_branch ;;
   *)
-    echo "用法: guard <clean-check|branch-name|branch-exists|branch-missing|current-branch> [...]" >&2
+    echo "用法: guard <clean-check|branch-name|branch-prefix-ok|branch-base|branch-exists|branch-missing|current-branch> [...]" >&2
     exit 2
     ;;
 esac

@@ -4,6 +4,7 @@
 #   1. 合并冲突标记
 #   2. 疑似密钥/凭据
 #   3. 超大文件（>5MB）
+#   4. 落后基线软提醒（dev 中心模型；硬拦在 pre-push 出口铁闸）
 #
 # 覆盖所有 git 客户端（Codex / Claude Code / 人类）。
 # 跳过: GIT_FLOW_SKIP_PRE_COMMIT=1 git commit ...
@@ -38,6 +39,25 @@ while IFS= read -r f; do
     die "文件过大（$((size / 1024 / 1024))MB > 5MB）：$f，请改用 Git LFS 或移除"
   fi
 done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+# 4. 落后基线软提醒（同步 = 自动阻断：软提醒早冒信号，硬拦在 pre-push）
+#    工单分支（feature/fix/docs/chore）对比 origin/develop，hotfix 对比 origin/main。
+#    每次 commit 静默 fetch，失败不阻断。
+current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+base=""
+case "$current_branch" in
+  feature/*|fix/*|docs/*|chore/*) base=develop ;;
+  hotfix/*) base=main ;;
+esac
+if [ -n "$base" ]; then
+  git fetch origin "$base" >/dev/null 2>&1 || true
+  if git rev-parse --verify --quiet "origin/$base" >/dev/null 2>&1; then
+    behind=$(git rev-list --count "$current_branch".."origin/$base" 2>/dev/null || echo 0)
+    if [ "$behind" -gt 0 ] 2>/dev/null; then
+      printf '[pre-commit] 提示: %s 落后 origin/%s 约 %s 个提交，建议先 rebase（push 会被 pre-push 硬拦）\n' "$current_branch" "$base" "$behind" >&2
+    fi
+  fi
+fi
 
 [ "$fail" -eq 0 ] || exit 1
 exit 0
