@@ -22,7 +22,7 @@
 │   └── block-dangerous.sh ← Codex 与 Claude Code 共用的 shell 危险命令策略
 ├── CONTEXT.md           ← 领域词汇表（套件/技能/轻量 Git Flow/钩子…）
 └── docs/
-    ├── adr/             ← 0001 布局与符号链接策略、0002 翻译策略、0003 Git Flow+双钩子
+    ├── adr/             ← 0001 布局与符号链接策略、0002 翻译策略、0003 Git Flow+双钩子、0004 代码发现工具链
     └── agent-conventions.md ← Codex / Claude Code 官方约定调研（含来源）
 ```
 
@@ -43,6 +43,15 @@
 4. `git config core.hooksPath .agents/hooks`（git 层保护对所有 git 客户端生效）
 
 已有文件不会被覆盖：真实文件冲突只报告不动手；`settings.json`/`hooks.json` 已存在时用 `jq` 合并（无 `jq` 则提示手动添加）。
+
+## 代码发现（Code Discovery）
+
+`AGENTS.md` 的「代码发现 —— 决策流」优先使用两个**可选**的外部工具；都不可用时自动回退 `grep`，不会阻塞。两者都是用户级集成，**不在套件打包范围内**，`install.sh` 不安装、不配置它们。
+
+- **codebase-memory-mcp**：维护项目代码知识图的 MCP 服务器，提供 `search_graph` / `trace_path` / `get_code_snippet` 等符号级查询。启用方式：连接 MCP server 后对项目运行 `index_repository` 建立索引；可用前提是「服务器已连接且项目已索引」。
+- **graphify**：生成并查询代码知识图（`graphify-out/graph.json`）的 CLI 与用户级技能，提供 `query` / `path` / `explain` 做关系级/高层查询。启用方式：用户安装 graphify 后运行 `/graphify`（或 `graphify update .`）生成图；可用前提是 `graphify-out/graph.json` 存在。
+
+graphify 为可选集成：用户安装后它出现在用户级技能目录，任何按技能约定读取的 CLI（Codex、Claude Code 等）理论上都能调用；codebase-memory-mcp 则以 MCP server 形式接入各 agent。两者都缺失时，决策流按 AGENTS.md 回退到 `grep`。
 
 ## 轻量 Git Flow
 
@@ -73,11 +82,14 @@
 
 其他（1）：find-skills
 
+> 注：`graphify` 不在上述 27 个套件技能内——它是可选集成，用户安装后出现在用户级技能目录，Codex、Claude Code 等任何 CLI 理论上均可用；`codebase-memory-mcp` 是 MCP server，同样非套件打包内容。见「代码发现」一节。
+
 ## 设计决策（ADR）
 
 - [0001 套件布局与符号链接策略](.agents/docs/adr/0001-kit-layout-and-symlink-strategy.md)
 - [0002 中文翻译策略](.agents/docs/adr/0002-chinese-translation-policy.md)
 - [0003 轻量 Git Flow 与双钩子架构](.agents/docs/adr/0003-lightweight-gitflow-and-dual-hooks.md)
+- [0004 代码发现工具链](.agents/docs/adr/0004-code-discovery-toolchain.md)
 
 ## 术语
 

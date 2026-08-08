@@ -30,3 +30,15 @@ _Avoid_: 拦截器、守卫脚本
 **安装脚本（Install Script）**:
 套件内置的 `scripts/install.sh`（bash，`--check/--sync` 模式）：把 `.agents/` 中的权威内容以符号链接接入各 agent 目录（`.claude/skills/`、根 `AGENTS.md`/`CLAUDE.md`）并写入钩子配置，不复制内容。
 _Avoid_: 同步工具、部署脚本
+
+**代码发现决策流（Code Discovery Decision Flow）**:
+AGENTS.md 内置的工具选择规则：符号级查询首选 codebase-memory-mcp，关系级/高层查询首选 graphify，字符串与配置用 grep；前两者不可用时一律回退 grep，不阻塞。
+_Avoid_: 代码检索策略、导航指南
+
+**codebase-memory-mcp**:
+维护项目代码知识图（函数、类、调用关系）的 MCP 服务器，提供 search_graph、trace_path、get_code_snippet 等符号级查询；需连接服务器并对项目索引后可用。
+_Avoid_: 语义搜索引擎、grep 替代品
+
+**graphify**:
+生成并查询代码知识图（graphify-out/graph.json）的 CLI 与用户级技能，提供 query/path/explain 做关系级查询；用户安装后 Codex、Claude Code 等 CLI 理论上均可调用。
+_Avoid_: 架构图生成器、类图工具
