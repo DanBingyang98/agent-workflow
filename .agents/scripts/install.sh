@@ -120,8 +120,13 @@ write_hook_json() {
       drift "$file 缺少 block-dangerous 钩子"
       if [ "$MODE" = sync ]; then
         tmp="${file}.tmp.$$"
-        printf '%s' "$block" | jq -s '.[0] as $new | .[1] as $old | $old | .hooks.PreToolUse += $new.hooks.PreToolUse' - "$file" > "$tmp" \
-          && mv -- "$tmp" "$file" && say "已合并 $file"
+        if printf '%s' "$block" | jq -s '.[0] as $new | .[1] as $old | $old | .hooks.PreToolUse += $new.hooks.PreToolUse' - "$file" > "$tmp" \
+          && mv -- "$tmp" "$file"; then
+          say "已合并 $file"
+        else
+          conflict "无法合并 $file（写入失败）"
+          rm -f -- "$tmp" 2>/dev/null || true
+        fi
       fi
     else
       conflict "$file 已存在且缺少 jq，无法自动合并；请手动添加 block-dangerous 钩子"
@@ -129,7 +134,11 @@ write_hook_json() {
   else
     drift "$file 缺失"
     if [ "$MODE" = sync ]; then
-      printf '%s\n' "$block" > "$file" && say "已创建 $file"
+      if [ -w "$(dirname "$file")" ]; then
+        printf '%s\n' "$block" > "$file" && say "已创建 $file"
+      else
+        conflict "无法写入 $file（目录只读或权限不足）"
+      fi
     fi
   fi
 }

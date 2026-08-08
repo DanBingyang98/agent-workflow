@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 #
-# flow - 轻量 Git Flow 命令集（中文版 agent 工作流）
+# flow - dev 中心分支模型命令集（中文版 agent 工作流）
 #
-# 分支模型: main（受保护，仅发布） + develop（集成分支） + feature/* + hotfix/*
-# 不设 release/*。main 只接受从 hotfix 的受保护合并。
+# 分支模型: main（生产镜像）+ develop（远程集成分支），两者 PR-only；
+#           feature/* fix/* docs/* chore/* 从 origin/develop 切出；
+#           hotfix/* 从 origin/main 切出，PR 合 main 后须回合 develop。
+# 合并只在托管平台 PR 服务端发生，本脚本不做本地合并。
 #
 # 用法:
-#   flow feature start <name>    从 develop 创建 feature/<name>
-#   flow feature finish <name>   合并 feature/<name> 到 develop 并删除分支
-#   flow hotfix start <name>     从 main 创建 hotfix/<name>
-#   flow hotfix finish <name>    合并 hotfix/<name> 到 main 与 develop 并删除分支
-#   flow status                  显示当前分支与仓库状态
-#   flow help                    显示本帮助
+#   flow feature start <name>          从 origin/develop 创建 feature/<name>
+#   flow feature finish <name>         校验并汇报，默认不碰远程
+#   flow feature finish --push <name>  显式授权后推送分支（PR 交给项目流程）
+#   flow fix|docs|chore <同上>
+#   flow hotfix start <name>           从 origin/main 创建 hotfix/<name>
+#   flow hotfix finish [--push] <name>
+#   flow status                        显示当前分支与仓库状态
+#   flow help                          显示本帮助
 
 set -u
 
@@ -24,62 +28,53 @@ die() {
 }
 
 usage() {
-  sed -n '3,12p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 require_guard() {
   [ -x "$GUARD" ] || die "缺少 guard 脚本: $GUARD（请 chmod +x）"
 }
 
-feature_start() {
-  local name="${1:-}" target
+start_branch() {
+  local prefix="$1" name="$2" base_remote="$3" base_local="$4" target
   require_guard
   "$GUARD" branch-name "$name" || exit 1
   "$GUARD" clean-check || exit 1
-  target="feature/$name"
+  target="$prefix/$name"
   "$GUARD" branch-missing "$target" || exit 1
-  git checkout develop >/dev/null 2>&1 || die "无法切换到 develop（分支存在吗？）"
-  git pull --ff-only origin develop >/dev/null 2>&1 || true
-  git checkout -b "$target" || die "创建 $target 失败"
-  printf '[flow] 已创建 %s（基于 develop）\n' "$target"
+  git fetch origin >/dev/null 2>&1 || true
+  if git rev-parse --verify --quiet "origin/$base_remote" >/dev/null 2>&1; then
+    git checkout -b "$target" "origin/$base_remote" || die "创建 $target 失败（基于 origin/$base_remote）"
+    printf '[flow] 已创建 %s（基于 origin/%s）\n' "$target" "$base_remote"
+  elif git rev-parse --verify --quiet "$base_local" >/dev/null 2>&1; then
+    git checkout -b "$target" "$base_local" || die "创建 $target 失败（基于本地 $base_local）"
+    printf '[flow] 已创建 %s（基于本地 %s；未找到 origin/%s）\n' "$target" "$base_local" "$base_remote"
+  else
+    die "找不到基线分支 origin/$base_remote 或 $base_local"
+  fi
 }
 
-feature_finish() {
-  local name="${1:-}" target
+finish_branch() {
+  local prefix="$1" name="$2" target base push=0
   require_guard
-  target="feature/$name"
+  [ "${3:-}" = "--push" ] && push=1
+  target="$prefix/$name"
   "$GUARD" branch-exists "$target" || exit 1
-  git checkout develop >/dev/null 2>&1 || die "无法切换到 develop"
-  git merge --no-ff "$target" -m "Merge feature/$name into develop" || die "合并失败（冲突需手动解决）"
-  git branch -d "$target" || die "删除 $target 失败"
-  printf '[flow] 已合并 %s 到 develop 并删除分支\n' "$target"
-}
-
-hotfix_start() {
-  local name="${1:-}" target
-  require_guard
-  "$GUARD" branch-name "$name" || exit 1
-  "$GUARD" clean-check || exit 1
-  target="hotfix/$name"
-  "$GUARD" branch-missing "$target" || exit 1
-  git checkout main >/dev/null 2>&1 || die "无法切换到 main"
-  git pull --ff-only origin main >/dev/null 2>&1 || true
-  git checkout -b "$target" || die "创建 $target 失败"
-  printf '[flow] 已创建 %s（基于 main）\n' "$target"
-}
-
-hotfix_finish() {
-  local name="${1:-}" target
-  require_guard
-  target="hotfix/$name"
-  "$GUARD" branch-exists "$target" || exit 1
-  git checkout main >/dev/null 2>&1 || die "无法切换到 main"
-  git merge --no-ff "$target" -m "Merge hotfix/$name into main" || die "合并到 main 失败"
-  git checkout develop >/dev/null 2>&1 || die "无法切换到 develop"
-  git merge --no-ff "$target" -m "Merge hotfix/$name into develop" || die "合并到 develop 失败"
-  git branch -d "$target" || die "删除 $target 失败"
-  printf '[flow] 已合并 %s 到 main 与 develop，并删除分支\n' "$target"
-  printf '[flow] 提示：发布时分别推送 main 与 develop（pre-push 钩子会保护 main）\n'
+  "$GUARD" branch-prefix-ok "$target" || exit 1
+  base=$("$GUARD" branch-base "$target") || exit 1
+  printf '[flow] 分支 %s 待交付（合并只在 PR 服务端发生，本脚本不本地合并）\n' "$target"
+  printf '[flow] 最近提交:\n'
+  git log --oneline -5 "$target" 2>/dev/null || true
+  printf '[flow] 基线: origin/%s（push 时落后会被 pre-push 硬拦）\n' "$base"
+  if [ "$push" -eq 1 ]; then
+    git push -u origin "$target" || die "推送失败：若落后 origin/$base，先 rebase 再 --force-with-lease 重推"
+    printf '[flow] 已推送 %s。请按项目托管流程创建 PR（模板见 .agents/docs/pr-template.md）\n' "$target"
+    if [ "$prefix" = "hotfix" ]; then
+      printf '[flow] 提示: hotfix 合入 main 后当天必须回合 develop（发布闸兜底）\n'
+    fi
+  else
+    printf '[flow] 未推送（默认不碰远程）。确认后: flow %s finish --push %s\n' "$prefix" "$name"
+  fi
 }
 
 status_cmd() {
@@ -94,18 +89,28 @@ status_cmd() {
 }
 
 case "${1:-}" in
-  feature)
+  feature|fix|docs|chore)
     case "${2:-}" in
-      start) feature_start "${3:-}" ;;
-      finish) feature_finish "${3:-}" ;;
-      *) echo "用法: flow feature <start|finish> <name>" >&2; exit 2 ;;
+      start) start_branch "$1" "${3:-}" develop develop ;;
+      finish)
+        case "${3:-}" in
+          --push) finish_branch "$1" "${4:-}" --push ;;
+          *) finish_branch "$1" "${3:-}" "" ;;
+        esac
+        ;;
+      *) echo "用法: flow $1 <start|finish [--push]> <name>" >&2; exit 2 ;;
     esac
     ;;
   hotfix)
     case "${2:-}" in
-      start) hotfix_start "${3:-}" ;;
-      finish) hotfix_finish "${3:-}" ;;
-      *) echo "用法: flow hotfix <start|finish> <name>" >&2; exit 2 ;;
+      start) start_branch hotfix "${3:-}" main main ;;
+      finish)
+        case "${3:-}" in
+          --push) finish_branch hotfix "${4:-}" --push ;;
+          *) finish_branch hotfix "${3:-}" "" ;;
+        esac
+        ;;
+      *) echo "用法: flow hotfix <start|finish [--push]> <name>" >&2; exit 2 ;;
     esac
     ;;
   status) status_cmd ;;
