@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# pre-push - 保护 main / develop
-#   - 禁止删除 main / develop
-#   - 禁止 force-push 到 main / develop
-#   - 禁止非快进推送 main / develop（覆盖: GIT_FLOW_ALLOW_FORCE=1）
-#   - feature/* 分支 force 允许但告警
+# pre-push - dev 中心分支模型的「出口铁闸」
+#   - main / develop：PR-only，任何本地直推 / 删除一律拦截（远端初始化时的首次创建除外）
+#   - 白名单工单分支（feature/fix/docs/chore）落后 origin/develop → 硬拦
+#   - hotfix/* 落后 origin/main → 硬拦
+#   - 发布闸：hotfix 未回合（develop 落后 main）时，指向 main 的 push 附带说明
 #
 # stdin 每行: <本地 ref> <本地 oid> <远端 ref> <远端 oid>
 
@@ -12,13 +12,14 @@ set -u
 
 PROTECTED="refs/heads/main refs/heads/develop"
 
-force=0
-case "$*" in
-  *--force*|*-f*|*+refs/heads/*) force=1 ;;
-esac
-
-allow_force="${GIT_FLOW_ALLOW_FORCE:-0}"
 fail=0
+
+# 静默刷新基线（失败不阻断；网络问题由人兜底）
+git fetch origin main >/dev/null 2>&1 || true
+git fetch origin develop >/dev/null 2>&1 || true
+
+main_up=$(git rev-parse --verify --quiet origin/main)
+dev_up=$(git rev-parse --verify --quiet origin/develop)
 
 while read -r local_ref local_oid remote_ref remote_oid; do
   is_protected=0
@@ -26,44 +27,45 @@ while read -r local_ref local_oid remote_ref remote_oid; do
     [ "$remote_ref" = "$p" ] && is_protected=1
   done
 
-  is_force=0
-  case "$local_ref" in
-    +*) is_force=1 ;;
-  esac
-
   # 删除分支: 本地 oid 全零
   if [ "$local_oid" = "0000000000000000000000000000000000000000" ]; then
     if [ "$is_protected" -eq 1 ]; then
-      printf '[pre-push] 拦截: 禁止删除受保护分支 %s\n' "$remote_ref" >&2
+      printf '[pre-push] 拦截: 禁止删除 PR-only 保护分支 %s\n' "$remote_ref" >&2
       fail=1
     fi
     continue
   fi
 
-  # 新建分支: 远端 oid 全零，放行
+  # 新建分支（远端 oid 全零）：允许创建性推送（含首次初始化 main/develop；此后任何更新走 PR）
   [ "$remote_oid" = "0000000000000000000000000000000000000000" ] && continue
 
-  # 判断是否快进: 本地 oid 是否是远端 oid 的后代
-  if ! git merge-base --is-ancestor "$remote_oid" "$local_oid" 2>/dev/null; then
-    non_ff=1
-  else
-    non_ff=0
+  # 保护分支：任何 push 一律拦截（进 main 走发布 PR，进 develop 走工单集成 PR）
+  if [ "$is_protected" -eq 1 ]; then
+    printf '[pre-push] 拦截: %s 是 PR-only 保护分支，禁止本地直推（合并只在托管平台 PR 服务端发生）\n' "$remote_ref" >&2
+    if [ "$remote_ref" = "refs/heads/main" ] && [ -n "$main_up" ] && [ -n "$dev_up" ] \
+      && ! git merge-base --is-ancestor "$main_up" "$dev_up" 2>/dev/null; then
+      behind=$(git rev-list --count "$dev_up".."$main_up" 2>/dev/null || echo "?")
+      printf '[pre-push]   发布闸: develop 落后 main 约 %s 个提交（有 hotfix 未回合 develop）\n' "$behind" >&2
+    fi
+    fail=1
+    continue
   fi
 
-  if [ "$is_protected" -eq 1 ]; then
-    if [ "$is_force" -eq 1 ] || [ "$force" -eq 1 ] || [ "$non_ff" -eq 1 ]; then
-      if [ "$allow_force" = "1" ]; then
-        printf '[pre-push] 警告: 受保护分支 %s 的强制/非快进推送已被 GIT_FLOW_ALLOW_FORCE 放行\n' "$remote_ref" >&2
-      else
-        printf '[pre-push] 拦截: 禁止对 %s 做强制/非快进推送（发布请走受保护的合并流程）\n' "$remote_ref" >&2
-        printf '  确认安全可覆盖: GIT_FLOW_ALLOW_FORCE=1 git push ...\n' >&2
-        fail=1
-      fi
-    fi
-  else
-    if [ "$is_force" -eq 1 ] || [ "$force" -eq 1 ]; then
-      printf '[pre-push] 警告: 对 %s 使用 force 推送，请确认没有覆盖他人工作\n' "$remote_ref" >&2
-    fi
+  # 白名单工单分支落后基线 → 硬拦（出口铁闸）
+  case "$remote_ref" in
+    refs/heads/hotfix/*) upstream="$main_up"; base="main" ;;
+    refs/heads/feature/*|refs/heads/fix/*|refs/heads/docs/*|refs/heads/chore/*) upstream="$dev_up"; base="develop" ;;
+    *) continue ;;
+  esac
+
+  # 基线取不到（离线 / 未建）→ 放行，不阻断
+  [ -z "$upstream" ] && continue
+
+  if ! git merge-base --is-ancestor "$upstream" "$local_oid" 2>/dev/null; then
+    behind=$(git rev-list --count "$local_oid".."$upstream" 2>/dev/null || echo "?")
+    printf '[pre-push] 拦截: %s 落后 origin/%s 约 %s 个提交（未包含集成分支最新）\n' "$remote_ref" "$base" "$behind" >&2
+    printf '  rebase 基线后重推: git rebase origin/%s && git push --force-with-lease origin %s\n' "$base" "${remote_ref#refs/heads/}" >&2
+    fail=1
   fi
 done
 

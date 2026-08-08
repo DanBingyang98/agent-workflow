@@ -3,6 +3,8 @@
 > **范围**：全局默认。
 减少常见 LLM 编码错误的行为准则。按需与项目特定指令结合使用。
 
+> **元约束（最高优先级）**：本文件只承载**导航**与**长期约束**，不是事实手册。凡涉及具体值（端口、版本、业务码、路径、接口签名），一律以代码现状为准；发现文档与代码矛盾，当场修正本文件。决策背景见 `.agents/docs/adr/0007-rule-doc-boundary.md`。
+
 **取舍：** 这些准则偏向谨慎而非速度。对琐碎任务，自行判断。
 
 ## 1. 先思考，后编码
@@ -62,6 +64,23 @@
 ---
 
 **这些准则生效的标志是：** diff 里不必要的改动更少、因过度复杂造成的重写更少、澄清问题出现在实现之前而不是犯错之后。
+
+---
+
+## 工作流：dev 中心分支模型（套件默认）
+
+合并只在托管平台 PR 服务端发生，本地不做整合合并。
+
+- **分支**：`main` = 生产镜像，`develop` = 远程集成分支，两者 PR-only（禁直推/强推/删除）。工单分支 `feature/*`、`fix/*`、`docs/*`、`chore/*` 从 `origin/develop` 切；`hotfix/*` 从 `origin/main` 切，PR 合 `main` 后当天必须回合 `develop`（发布闸兜底）。
+- **发布**：唯一通道 = `develop→main` 发布 PR，一律人工审合，PR 描述必填工单列表与测试记录；合并后打 `release/<日期>` tag。
+- **合并方法**：一律 merge，禁 squash/rebase（改写 sha 会与 `branch -D` 拦截互锁成清理死锁）。
+- **提交与同步**：Conventional Commits，一次提交只干一件事。动 git 前先 `git fetch`；工单分支落后基线会被 pre-push 硬拦（pre-commit 软提醒），rebase 后 `--force-with-lease` 重推（仅白名单工单分支）。
+- **人工闸门**：工单分支完成后暂停，汇报改动、测试与 commit 列表；未经用户明确授权，不推送、不开 PR；发布 PR 禁 AI 自合。
+- **危险操作**：shell 层拦截 `rm -rf`、`git reset --hard`、`git clean -f`、裸 `git push --force`、`git branch -D`、`git merge --squash` 等；受保护分支任何直推都被 pre-push 拦截。
+
+完整流程见 `.agents/docs/dev-integration-workflow.md`，PR 模板见 `.agents/docs/pr-template.md`。
+
+---
 
 ## 代码发现 —— 决策流
 
